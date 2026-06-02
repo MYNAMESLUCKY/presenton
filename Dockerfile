@@ -11,16 +11,16 @@ RUN python -m venv --without-pip /opt/venv \
     && pip install --no-cache-dir uv
 
 COPY servers/fastapi/pyproject.toml servers/fastapi/uv.lock ./
-RUN --mount=type=cache,id=uv_cache_1,target=/root/.cache/uv \
+RUN --mount=type=cache,id=s/f4ed9832-5af2-4f5a-a0cc-5aa13c84a2e3-/root/.cache/uv,target=/root/.cache/uv \
     uv export --frozen --no-dev --no-emit-project -o /tmp/requirements.txt \
     && uv pip install --python /opt/venv/bin/python -r /tmp/requirements.txt
 
 COPY servers/fastapi /app/servers/fastapi
-RUN --mount=type=cache,id=uv_cache_2,target=/root/.cache/uv \
+RUN --mount=type=cache,id=s/f4ed9832-5af2-4f5a-a0cc-5aa13c84a2e3-/root/.cache/uv,target=/root/.cache/uv \
     uv pip install --python /opt/venv/bin/python --no-deps .
 # mem0/spaCy BM25 lemmatization loads en_core_web_sm at runtime; spaCy tries pip to
 # download it otherwise. Runtime image has no pip in PATH (--without-pip venv).
-RUN --mount=type=cache,id=uv_cache_3,target=/root/.cache/uv \
+RUN --mount=type=cache,id=s/f4ed9832-5af2-4f5a-a0cc-5aa13c84a2e3-/root/.cache/uv,target=/root/.cache/uv \
     uv pip install --python /opt/venv/bin/python \
     "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl"
 ENV HF_HOME=/root/.cache/huggingface \
@@ -36,7 +36,7 @@ WORKDIR /app/servers/nextjs
 ENV NEXT_TELEMETRY_DISABLED=1
 
 COPY servers/nextjs/package.json servers/nextjs/package-lock.json ./
-RUN --mount=type=cache,id=npm_cache,target=/root/.npm \
+RUN --mount=type=cache,id=s/f4ed9832-5af2-4f5a-a0cc-5aa13c84a2e3-/root/.npm,target=/root/.npm \
     npm ci
 
 COPY servers/nextjs /app/servers/nextjs
