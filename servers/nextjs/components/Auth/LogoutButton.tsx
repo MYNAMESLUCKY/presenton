@@ -1,9 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { LogOut } from "lucide-react";
-
-import { getApiUrl } from "@/utils/api";
+import { createClient } from "@/lib/supabase/client";
 
 type LogoutButtonProps = {
   label?: string;
@@ -17,6 +16,7 @@ export default function LogoutButton({
   iconOnly = false,
 }: LogoutButtonProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const supabase = useMemo(() => createClient(), []);
 
   const handleLogout = async () => {
     if (isSubmitting) {
@@ -25,12 +25,9 @@ export default function LogoutButton({
 
     setIsSubmitting(true);
     try {
-      await fetch(getApiUrl("/api/v1/auth/logout"), {
-        method: "POST",
-        credentials: "include",
-      });
+      await supabase.auth.signOut();
     } catch {
-      // Always route back to auth gate even if backend logout fails.
+      // Always route back to auth gate even if sign-out fails.
     } finally {
       window.location.replace("/");
       setIsSubmitting(false);

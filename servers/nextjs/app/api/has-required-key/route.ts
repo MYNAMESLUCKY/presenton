@@ -1,22 +1,19 @@
 import { NextResponse } from "next/server";
-import { readUserConfigFile } from "@/lib/user-config-store";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * GET /api/has-required-key
+ * Checks environment variables directly for required LLM API keys.
+ */
 export async function GET() {
-  const userConfigPath = process.env.USER_CONFIG_PATH;
-
-  let keyFromFile = "";
-  if (userConfigPath) {
-    try {
-      const cfg = readUserConfigFile<{ OPENAI_API_KEY?: string }>(userConfigPath);
-      keyFromFile = cfg?.OPENAI_API_KEY || "";
-    } catch {
-      keyFromFile = "";
-    }
-  }
-  const keyFromEnv = process.env.OPENAI_API_KEY || "";
-  const hasKey = Boolean((keyFromFile || keyFromEnv).trim());
+  // Check for any configured LLM API key
+  const hasKey = Boolean(
+    (process.env.OPENAI_API_KEY || "").trim() ||
+    (process.env.CUSTOM_LLM_API_KEY || "").trim() ||
+    (process.env.GOOGLE_API_KEY || "").trim() ||
+    (process.env.ANTHROPIC_API_KEY || "").trim()
+  );
 
   return NextResponse.json({ hasKey });
 }

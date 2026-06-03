@@ -1,3 +1,10 @@
+/**
+ * API URL utilities for PresentOn Render deployment.
+ * 
+ * All /api/v1/* calls route to the external FastAPI backend (NEXT_PUBLIC_FAST_API).
+ * All /api/* calls (without /v1/) are internal Next.js API routes.
+ */
+
 function isAbsoluteHttpUrl(path: string): boolean {
   return /^https?:\/\//i.test(path);
 }
@@ -7,8 +14,8 @@ function withLeadingSlash(path: string): string {
 }
 
 function getConfiguredFastApiUrl(): string | null {
-  if (typeof window !== "undefined" && window.env?.NEXT_PUBLIC_FAST_API) {
-    return window.env.NEXT_PUBLIC_FAST_API;
+  if (typeof window !== "undefined" && (window as any).env?.NEXT_PUBLIC_FAST_API) {
+    return (window as any).env.NEXT_PUBLIC_FAST_API;
   }
 
   if (process.env.NEXT_PUBLIC_FAST_API) {
@@ -18,66 +25,17 @@ function getConfiguredFastApiUrl(): string | null {
   return null;
 }
 
-function getFastApiUrlFromQuery(): string | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const params = new URLSearchParams(window.location.search);
-    const value = params.get("fastapiUrl");
-    if (!value) return null;
-
-    const parsed = new URL(value);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      return null;
-    }
-    return parsed.origin;
-  } catch {
-    return null;
-  }
-}
-
-function isElectronRuntime(): boolean {
-  return typeof window !== "undefined" && !!window.electron;
-}
-
-function shouldUseDirectFastApiOriginInBrowser(): boolean {
-  return isElectronRuntime() || !!getFastApiUrlFromQuery();
-}
-
-function resolveBackendPathForRuntime(path: string): string {
-  const normalizedPath = withLeadingSlash(path);
-
-  // Docker/web runtime should stay same-origin and use nginx reverse proxy.
-  if (
-    typeof window !== "undefined" &&
-    !shouldUseDirectFastApiOriginInBrowser()
-  ) {
-    return normalizedPath;
-  }
-
-  return `${getFastAPIUrl()}${normalizedPath}`;
-}
-
 // Utility to get the backend base URL.
-// - Browser web/docker: same origin (nginx proxy).
-// - Browser electron or query override: direct FastAPI origin.
-// - Server-side: configured FastAPI origin fallback.
 export function getFastAPIUrl(): string {
-  const queryFastApiUrl = getFastApiUrlFromQuery();
-  if (queryFastApiUrl) {
-    return queryFastApiUrl;
-  }
-
   if (typeof window !== "undefined") {
-    if (isElectronRuntime()) {
-      return getConfiguredFastApiUrl() || window.location.origin;
-    }
-    return window.location.origin;
+    // In browser: use configured FastAPI URL or same-origin (for nginx proxy setups)
+    return getConfiguredFastApiUrl() || window.location.origin;
   }
 
-  return getConfiguredFastApiUrl() || "http://127.0.0.1:5000";
+  return getConfiguredFastApiUrl() || "http://127.0.0.1:8000";
 }
 
-// Utility to construct API URL for Docker/web runtime.
+// Utility to construct API URL
 export function getApiUrl(path: string): string {
   if (isAbsoluteHttpUrl(path)) {
     return path;
@@ -85,21 +43,19 @@ export function getApiUrl(path: string): string {
 
   const normalizedPath = withLeadingSlash(path);
   const isFastApiEndpoint = normalizedPath.startsWith("/api/v1/");
+  
   if (!isFastApiEndpoint) {
+    // Internal Next.js API route — stay same-origin
     return normalizedPath;
   }
 
-  if (typeof window === "undefined" && !getConfiguredFastApiUrl()) {
-    return normalizedPath;
-  }
-
-  return resolveBackendPathForRuntime(normalizedPath);
+  // FastAPI endpoint — prefix with the backend URL
+  const fastApiUrl = getFastAPIUrl();
+  return `${fastApiUrl}${normalizedPath}`;
 }
 
 /**
- * getApiUrl may return a path without host (e.g. `/api/v1/...`). A single-argument
- * `new URL("/api/...")` call is invalid; use this before `new URL(..., ...)`-style
- * builds or to obtain an absolute string for `URL` + `searchParams`.
+ * Build an absolute URL suitable for `new URL(...)`.
  */
 export function buildAbsoluteApiRequestUrl(
   path: string,
@@ -173,6 +129,11 @@ function splitPathAndSuffix(value: string): { path: string; suffix: string } {
     path: value.slice(0, firstSuffixIdx),
     suffix: value.slice(firstSuffixIdx),
   };
+}
+
+function resolveBackendPathForRuntime(path: string): string {
+  const normalizedPath = withLeadingSlash(path);
+  return `${getFastAPIUrl()}${normalizedPath}`;
 }
 
 // Resolve backend-served asset paths to the runtime-appropriate backend path.

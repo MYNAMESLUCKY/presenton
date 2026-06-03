@@ -1,24 +1,22 @@
 const nextConfig = {
   reactStrictMode: false,
-  distDir: ".next-build",
   output: "standalone",
-  ...(process.env.NODE_ENV !== "production"
-    ? {
-        allowedDevOrigins: [
-          "http://127.0.0.1:40001",
-          "http://localhost:40001",
-          "127.0.0.1",
-          "localhost",
-        ],
-      }
-    : {}),
 
-  // Rewrites for development - proxy font requests to FastAPI backend
+  // Rewrites: proxy /api/v1/* requests to the FastAPI backend
   async rewrites() {
+    const fastApiUrl = process.env.PRESENTON_BASE_URL || process.env.NEXT_PUBLIC_FAST_API || 'http://localhost:8000';
     return [
       {
-        source: '/app_data/fonts/:path*',
-        destination: 'http://localhost:5000/app_data/fonts/:path*',
+        source: '/api/v1/:path*',
+        destination: `${fastApiUrl}/api/v1/:path*`,
+      },
+      {
+        source: '/app_data/:path*',
+        destination: `${fastApiUrl}/app_data/:path*`,
+      },
+      {
+        source: '/static/:path*',
+        destination: `${fastApiUrl}/static/:path*`,
       },
     ];
   },
@@ -48,6 +46,10 @@ const nextConfig = {
       {
         protocol: "https",
         hostname: "yefhrkuqbjcblofdcpnr.supabase.co",
+      },
+      {
+        protocol: "https",
+        hostname: "uoxvkrvkzhmjxraijwzo.supabase.co",
       },
       {
         protocol: "https",

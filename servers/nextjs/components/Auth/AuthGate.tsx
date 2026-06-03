@@ -2,41 +2,32 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
-import { getApiUrl } from "@/utils/api";
-import { formatFastApiDetail, UNAUTHORIZED_DETAIL } from "@/utils/authErrors";
 import { notify } from "@/components/ui/sonner";
+import { createClient } from "@/lib/supabase/client";
 
-type AuthStatus = {
-  configured: boolean;
-  authenticated: boolean;
-  username: string | null;
-};
-
-const initialStatus: AuthStatus = {
-  configured: false,
-  authenticated: false,
-  username: null,
-};
+type AuthMode = "login" | "signup";
 
 export default function AuthGate() {
-  const [status, setStatus] = useState<AuthStatus>(initialStatus);
   const [isLoading, setIsLoading] = useState(true);
   const [isRedirecting, setIsRedirecting] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [username, setUsername] = useState("");
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authMode, setAuthMode] = useState<AuthMode>("login");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const isSetupMode = useMemo(() => !status.configured, [status.configured]);
+
+  const supabase = useMemo(() => createClient(), []);
 
   useEffect(() => {
-    void refreshStatus();
+    void checkAuthStatus();
   }, []);
 
   useEffect(() => {
     if (
       typeof window === "undefined" ||
       isLoading ||
-      !status.authenticated ||
+      !isAuthenticated ||
       isRedirecting
     ) {
       return;
@@ -44,50 +35,16 @@ export default function AuthGate() {
 
     setIsRedirecting(true);
     window.location.replace("/upload");
-  }, [isLoading, isRedirecting, status.authenticated]);
+  }, [isLoading, isRedirecting, isAuthenticated]);
 
-  useEffect(() => {
-    if (typeof window === "undefined" || isLoading) {
-      return;
-    }
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("reason") === "unauthorized") {
-      if (status.configured && !status.authenticated) {
-        notify.error("Unauthorized", "Sign in to view this page.", {
-          id: "auth-unauthorized-redirect",
-          duration: 5000,
-        });
-      }
-      window.history.replaceState({}, "", window.location.pathname);
-    }
-  }, [isLoading, status.authenticated, status.configured]);
-
-  const refreshStatus = async () => {
+  const checkAuthStatus = async () => {
     setIsLoading(true);
-
     try {
-      const response = await fetch(getApiUrl("/api/v1/auth/status"), {
-        method: "GET",
-        cache: "no-store",
-        credentials: "include",
-      });
-
-      if (!response.ok) {
-        throw new Error("Could not load login state");
-      }
-
-      const data = (await response.json()) as AuthStatus;
-      setStatus({
-        configured: Boolean(data.configured),
-        authenticated: Boolean(data.authenticated),
-        username: data.username ?? null,
-      });
-    } catch (fetchError) {
-      console.error(fetchError);
-      notify.error(
-        "Could not load login",
-        "We could not connect to the login service. Please refresh and try again."
-      );
+      const { data: { user } } = await supabase.auth.getUser();
+      setIsAuthenticated(!!user);
+    } catch (error) {
+      console.error("Auth check failed:", error);
+      setIsAuthenticated(false);
     } finally {
       setIsLoading(false);
     }
@@ -96,11 +53,11 @@ export default function AuthGate() {
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    const cleanedUsername = username.trim();
-    if (cleanedUsername.length < 3) {
+    const cleanedEmail = email.trim();
+    if (!cleanedEmail || !cleanedEmail.includes("@")) {
       notify.warning(
-        "Username too short",
-        "Your username must be at least 3 characters."
+        "Invalid email",
+        "Please enter a valid email address."
       );
       return;
     }
@@ -113,7 +70,7 @@ export default function AuthGate() {
       return;
     }
 
-    if (isSetupMode && password !== confirmPassword) {
+    if (authMode === "signup" && password !== confirmPassword) {
       notify.warning(
         "Passwords do not match",
         "Make sure both password fields match before continuing."
@@ -124,65 +81,53 @@ export default function AuthGate() {
     setIsSubmitting(true);
 
     try {
-      const response = await fetch(
-        getApiUrl(isSetupMode ? "/api/v1/auth/setup" : "/api/v1/auth/login"),
-        {
-          method: "POST",
-          credentials: "include",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            username: cleanedUsername,
-            password,
-          }),
-        }
-      );
+      if (authMode === "signup") {
+        const { data, error } = await supabase.auth.signUp({
+          email: cleanedEmail,
+          password,
+        });
 
-      const payload = await response.json();
-      if (!response.ok) {
-        const detail = formatFastApiDetail(payload?.detail);
-        if (response.status === 401) {
+        if (error) {
+          notify.error("Sign-up failed", error.message);
+          return;
+        }
+
+        if (data.user && !data.session) {
+          // Email confirmation required
+          notify.success(
+            "Check your email",
+            "We sent you a confirmation link. Please check your email to verify your account.",
+            { duration: 8000 }
+          );
+          setAuthMode("login");
+          setPassword("");
+          setConfirmPassword("");
+          return;
+        }
+
+        // Auto-confirmed (if email confirmation is disabled in Supabase)
+        setIsAuthenticated(true);
+        notify.success("Account created", "Welcome! Loading your workspace.");
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({
+          email: cleanedEmail,
+          password,
+        });
+
+        if (error) {
           notify.error(
             "Sign-in failed",
-            detail === UNAUTHORIZED_DETAIL
-              ? "The username or password is incorrect. Please try again."
-              : detail
+            error.message === "Invalid login credentials"
+              ? "The email or password is incorrect. Please try again."
+              : error.message
           );
-        } else {
-          notify.error(
-            isSetupMode ? "Could not create account" : "Sign-in failed",
-            detail || "Something went wrong. Please try again."
-          );
+          return;
         }
-        return;
-      }
 
-      if (isSetupMode) {
-        setStatus({
-          configured: true,
-          authenticated: false,
-          username: (payload as AuthStatus).username ?? cleanedUsername,
-        });
+        setIsAuthenticated(true);
         setPassword("");
-        setConfirmPassword("");
-        notify.success("Account created", "Sign in with your new username and password to continue.", {
-          duration: 6000,
-        });
-        return;
+        notify.success("Signed in", "Welcome back. Loading your workspace.");
       }
-
-      setStatus({
-        configured: Boolean((payload as AuthStatus).configured),
-        authenticated: Boolean((payload as AuthStatus).authenticated),
-        username: (payload as AuthStatus).username ?? cleanedUsername,
-      });
-      setPassword("");
-      setConfirmPassword("");
-      notify.success(
-        "Signed in",
-        "Welcome back. Loading your workspace."
-      );
     } catch (submitError) {
       console.error(submitError);
       notify.error(
@@ -194,7 +139,7 @@ export default function AuthGate() {
     }
   };
 
-  if (isLoading || isRedirecting || status.authenticated) {
+  if (isLoading || isRedirecting || isAuthenticated) {
     return (
       <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-white p-6">
         <div className="relative z-10 w-full max-w-md">
@@ -246,29 +191,30 @@ export default function AuthGate() {
                 Secure instance
               </p>
               <h1 className="mt-1 font-syne text-2xl font-semibold leading-tight text-black sm:text-[26px]">
-                {isSetupMode ? "Create your admin login" : "Sign in to continue"}
+                {authMode === "signup" ? "Create your account" : "Sign in to continue"}
               </h1>
             </div>
           </div>
         </div>
 
         <p className="font-syne text-base text-[#000000CC] sm:text-lg">
-          {isSetupMode
-            ? "One-time setup for this deployment. You will use the same username and password on future visits."
-            : "This deployment is protected. Enter your credentials to open the app."}
+          {authMode === "signup"
+            ? "Create an account to start building beautiful presentations."
+            : "Enter your credentials to open the presentation workspace."}
         </p>
 
         <form onSubmit={handleSubmit} className="mt-8 space-y-5">
           <div className="space-y-2">
-            <label htmlFor="username" className="block font-syne text-sm font-medium text-black">
-              Username
+            <label htmlFor="email" className="block font-syne text-sm font-medium text-black">
+              Email
             </label>
             <input
-              id="username"
-              autoComplete="username"
-              value={username}
-              onChange={(event) => setUsername(event.target.value)}
-              placeholder="your-admin-user"
+              id="email"
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="you@example.com"
               className="w-full rounded-[11px] border border-[#EDEEEF] bg-white px-4 py-3 font-syne text-sm text-black outline-none transition placeholder:text-[#999999] focus:border-[#a49cfc] focus:ring-2 focus:ring-[#5146E5]/20"
               disabled={isSubmitting}
             />
@@ -281,7 +227,7 @@ export default function AuthGate() {
             <input
               id="password"
               type="password"
-              autoComplete={isSetupMode ? "new-password" : "current-password"}
+              autoComplete={authMode === "signup" ? "new-password" : "current-password"}
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               placeholder="At least 6 characters"
@@ -290,7 +236,7 @@ export default function AuthGate() {
             />
           </div>
 
-          {isSetupMode ? (
+          {authMode === "signup" ? (
             <div className="space-y-2">
               <label htmlFor="confirmPassword" className="block font-syne text-sm font-medium text-black">
                 Confirm password
@@ -308,25 +254,31 @@ export default function AuthGate() {
             </div>
           ) : null}
 
-          {!isSetupMode && status.configured ? (
-            <p className="font-syne text-sm text-[#494A4D]">
-              Setup is complete for this instance. Use the username and password you configured.
-            </p>
-          ) : null}
-
           <button
             type="submit"
             disabled={isSubmitting}
             className="w-full rounded-[58px] border border-[#EDEEEF] bg-[#7C51F8] px-5 py-3 font-syne text-xs font-semibold text-white transition hover:bg-[#6d46e6] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isSubmitting
-              ? isSetupMode
-                ? "Saving credentials…"
+              ? authMode === "signup"
+                ? "Creating account…"
                 : "Signing in…"
-              : isSetupMode
+              : authMode === "signup"
                 ? "Create account"
                 : "Sign in"}
           </button>
+
+          <div className="text-center">
+            <button
+              type="button"
+              onClick={() => setAuthMode(authMode === "login" ? "signup" : "login")}
+              className="font-syne text-sm text-[#7A5AF8] hover:underline"
+            >
+              {authMode === "login"
+                ? "Don't have an account? Sign up"
+                : "Already have an account? Sign in"}
+            </button>
+          </div>
         </form>
       </section>
     </main>
