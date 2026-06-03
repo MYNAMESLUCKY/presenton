@@ -65,6 +65,8 @@ def get_database_url_and_connect_args() -> tuple[str, dict]:
         database_url = database_url.replace("sqlite://", "sqlite+aiosqlite://", 1)
     elif database_url.startswith("postgresql://"):
         database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    elif database_url.startswith("postgres://"):
+        database_url = database_url.replace("postgres://", "postgresql+asyncpg://", 1)
     elif database_url.startswith("mysql://"):
         database_url = database_url.replace("mysql://", "mysql+aiomysql://", 1)
     else:
@@ -119,6 +121,9 @@ def to_sync_sqlalchemy_url(database_url: str) -> str:
         return f"mysql+pymysql://{rest}"
     if database_url.startswith("postgresql://"):
         rest = database_url[len("postgresql://") :]
+        return f"postgresql+psycopg://{rest}"
+    if database_url.startswith("postgres://"):
+        rest = database_url[len("postgres://") :]
         return f"postgresql+psycopg://{rest}"
     if database_url.startswith("mysql://"):
         rest = database_url[len("mysql://") :]
